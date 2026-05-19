@@ -154,12 +154,20 @@ def _cmd_run_server(cli_config: Path | None, transport: str, port: int) -> int:
             len(resolved.config.github_hosts),
             len(resolved.config.repos),
         )
-    # FastMCP server wiring lands in phase 8.
-    print(
-        f"github-sdlc-mcp {__version__} — config resolution wired up (phase 2). "
-        f"Transport={transport} port={port}. Server itself lands in phase 8.",
-        file=sys.stderr,
+    # Import lazily so `config` subcommands don't pay the FastMCP import cost.
+    from github_sdlc_mcp.server import build_context, build_server
+
+    ctx = build_context(resolved)
+    server = build_server(ctx)
+    logger.info(
+        "Starting FastMCP server (transport=%s%s)",
+        transport,
+        f", port={port}" if transport != "stdio" else "",
     )
+    if transport == "stdio":
+        server.run(transport="stdio", show_banner=False)
+    else:
+        server.run(transport="streamable-http", port=port, show_banner=False)
     return 0
 
 

@@ -46,6 +46,7 @@ query PullRequestsPage($owner: String!, $name: String!, $cursor: String) {
         url
         isDraft
         createdAt
+        updatedAt
         mergedAt
         closedAt
         additions

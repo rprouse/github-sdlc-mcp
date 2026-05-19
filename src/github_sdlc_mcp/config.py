@@ -122,8 +122,13 @@ def _candidate_paths(
 
 
 def default_platformdirs_dir() -> Path:
-    """Return the user config directory for this app (platform-specific)."""
-    return Path(platformdirs.user_config_dir(APP_NAME))
+    """Return the user config directory for this app (platform-specific).
+
+    ``appauthor=False`` keeps Windows from double-nesting the app name as
+    both author and app — without it the path becomes
+    ``%APPDATA%\\github-sdlc-mcp\\github-sdlc-mcp\\``.
+    """
+    return Path(platformdirs.user_config_dir(APP_NAME, appauthor=False))
 
 
 def resolve_config(

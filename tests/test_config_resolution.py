@@ -294,14 +294,15 @@ def test_cli_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
 def test_cli_server_run_with_no_config_succeeds(
     empty_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Server entry point must not crash when no config exists yet."""
     monkeypatch.delenv(ENV_CONFIG_PATH, raising=False)
     monkeypatch.setattr(
         "github_sdlc_mcp.config.default_platformdirs_dir", lambda: empty_dir
     )
+    # Stub out the FastMCP run so we don't actually start a stdio loop.
+    import fastmcp
+
+    monkeypatch.setattr(fastmcp.FastMCP, "run", lambda self, **_kw: None)
     rc = main([])
-    captured = capsys.readouterr()
     assert rc == 0
-    assert "phase 2" in captured.err
