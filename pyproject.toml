@@ -5,7 +5,7 @@ description = "FastMCP server exposing SDLC metrics derived from GitHub."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "Rob Prouse", email = "r.prouse@valsoftcorp.com" }]
+authors = [{ name = "Rob Prouse", email = "rob@prouse.org" }]
 keywords = ["mcp", "fastmcp", "github", "sdlc", "metrics", "devex"]
 classifiers = [
     "Development Status :: 3 - Alpha",
