@@ -1,0 +1,32 @@
+# github-sdlc-mcp config — repos.yaml
+#
+# Tokens live in environment variables (referenced by token_env below),
+# never in this file. The MCP host injects them at launch time.
+#
+# Resolution order for this file's location:
+#   1. --config <path> on the CLI
+#   2. $GITHUB_SDLC_MCP_CONFIG
+#   3. platformdirs user config dir (this file's default location)
+#
+# Inspect with:  github-sdlc-mcp config path
+# Validate with: github-sdlc-mcp config validate
+
+github_hosts:
+  # Logical name → host configuration. The 'host' field of each repo
+  # below must match one of these keys.
+  cloud:
+    base_url: https://api.github.com
+    token_env: GITHUB_TOKEN
+
+  # Example GitHub Enterprise Server entry. Delete if you don't use one.
+  # acme_enterprise:
+  #   base_url: https://github.acme.internal/api/v3
+  #   token_env: GITHUB_TOKEN_ACME
+
+repos:
+  # List the repos this server should monitor. Add one entry per repo.
+  # 'company_label' is a free-form grouping shown in portfolio rollups.
+  - host: cloud
+    owner: your-org
+    repo: your-repo
+    company_label: YourCompany
