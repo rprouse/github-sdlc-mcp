@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 FIXTURE_DIR = Path(__file__).parent
 
@@ -60,5 +61,4 @@ def iter_active_repo_nodes() -> Iterator[dict[str, Any]]:
     with ACTIVE_REPOS_FIXTURE.open("r", encoding="utf-8") as f:
         pages = json.load(f)
     for page in pages:
-        for node in page["data"]["organization"]["repositories"]["nodes"]:
-            yield node
+        yield from page["data"]["organization"]["repositories"]["nodes"]
