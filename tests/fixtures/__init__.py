@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 FIXTURE_DIR = Path(__file__).parent
 
@@ -50,3 +50,15 @@ def iter_commit_nodes() -> list[dict[str, Any]]:
             page["data"]["repository"]["ref"]["target"]["history"]["nodes"]
         )
     return out
+
+
+ACTIVE_REPOS_FIXTURE = Path(__file__).parent / "github_active_repos.json"
+
+
+def iter_active_repo_nodes() -> Iterator[dict[str, Any]]:
+    """Yield every repo node from the paginated active-repos fixture."""
+    with ACTIVE_REPOS_FIXTURE.open("r", encoding="utf-8") as f:
+        pages = json.load(f)
+    for page in pages:
+        for node in page["data"]["organization"]["repositories"]["nodes"]:
+            yield node
