@@ -1,0 +1,44 @@
+[
+  {
+    "data": {
+      "organization": {
+        "repositories": {
+          "nodes": [
+            {
+              "name": "web",
+              "pushedAt": "2026-05-14T12:22:29Z",
+              "defaultBranchRef": { "name": "main" }
+            },
+            {
+              "name": "api",
+              "pushedAt": "2026-05-10T09:00:00Z",
+              "defaultBranchRef": { "name": "main" }
+            }
+          ],
+          "pageInfo": { "hasNextPage": true, "endCursor": "cursor-1" }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "organization": {
+        "repositories": {
+          "nodes": [
+            {
+              "name": "lib",
+              "pushedAt": "2026-05-05T03:30:00Z",
+              "defaultBranchRef": { "name": "main" }
+            },
+            {
+              "name": "ancient",
+              "pushedAt": "2024-11-01T00:00:00Z",
+              "defaultBranchRef": { "name": "main" }
+            }
+          ],
+          "pageInfo": { "hasNextPage": false, "endCursor": null }
+        }
+      }
+    }
+  }
+]
