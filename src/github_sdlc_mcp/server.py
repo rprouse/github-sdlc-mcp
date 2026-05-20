@@ -125,7 +125,15 @@ async def _active_repos(
 async def _load_prs_for_org(
     ctx: ServerContext, *, org: str, since: date, until: date
 ) -> list[NormalizedPR]:
-    """Walk active repos and fan-out PR fetches with a concurrency cap."""
+    """Walk active repos and fan-out PR fetches with a concurrency cap.
+
+    Fail-fast on purpose: if any single repo's fetch raises (permissions,
+    GraphQL error, transient network failure that exhausts the client's
+    retry budget), the whole tool call fails. v0.2 prefers loud failure
+    over silently returning a partial dataset that an agent could mistake
+    for a complete answer. Per-repo error swallowing with a warning channel
+    is on the v0.3+ list.
+    """
     repos, _scanned = await _active_repos(ctx, org=org, since=since, until=until)
     sem = asyncio.Semaphore(_MAX_CONCURRENT_REPO_FETCHES)
 
