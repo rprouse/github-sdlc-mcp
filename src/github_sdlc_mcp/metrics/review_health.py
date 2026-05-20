@@ -1,4 +1,4 @@
-"""PR review-health metrics over a window of merged PRs.
+"""PR review-health metrics over a window of merged PRs across an org.
 
 Per spec v2 §4, the fast-approval detector uses configurable thresholds. The
 defaults live in :mod:`metrics.definitions`; callers (CLI, tests) can override
@@ -8,7 +8,9 @@ to verify the knob wires through.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import date
+from itertools import groupby
 
 from github_sdlc_mcp.metrics._stats import (
     example_for_pr,
@@ -21,7 +23,12 @@ from github_sdlc_mcp.metrics.definitions import (
     FAST_APPROVAL_MIN_LINES_DEFAULT,
     definitions_for,
 )
-from github_sdlc_mcp.models import ExamplePR, NormalizedPR, ReviewHealthStats
+from github_sdlc_mcp.models import (
+    ExamplePR,
+    NormalizedPR,
+    ReviewHealthRepoSlice,
+    ReviewHealthStats,
+)
 
 _DEFINITION_KEYS = (
     "review_reviewers_per_pr",
@@ -33,9 +40,21 @@ _DEFINITION_KEYS = (
 )
 
 
+@dataclass
+class _RollupValues:
+    count: int
+    median_reviewers_per_pr: float | None
+    pct_merged_without_review: float | None
+    pct_merged_with_only_author_review: float | None
+    median_comments_per_pr: float | None
+    fast_approval_count: int
+    self_merge_count: int
+    no_review_prs: list[NormalizedPR]
+    fast_approval_prs: list[NormalizedPR]
+
 def compute_review_health(
     *,
-    repo: str,
+    org: str,
     since: date,
     until: date,
     prs: Iterable[NormalizedPR],
@@ -48,7 +67,7 @@ def compute_review_health(
 
     if not merged:
         return ReviewHealthStats(
-            repo=repo,
+            org=org,
             since=since,
             until=until,
             count=0,
@@ -59,9 +78,44 @@ def compute_review_health(
             fast_approval_count=0,
             self_merge_count=0,
             examples=[],
+            repos=[],
             definitions=defs,
         )
 
+    rollup = _aggregate(
+        merged,
+        fast_approval_min_lines=fast_approval_min_lines,
+        fast_approval_max_seconds=fast_approval_max_seconds,
+    )
+    repos = _per_repo_slices(
+        merged,
+        fast_approval_min_lines=fast_approval_min_lines,
+        fast_approval_max_seconds=fast_approval_max_seconds,
+    )
+
+    return ReviewHealthStats(
+        org=org,
+        since=since,
+        until=until,
+        count=rollup.count,
+        median_reviewers_per_pr=rollup.median_reviewers_per_pr,
+        pct_merged_without_review=rollup.pct_merged_without_review,
+        pct_merged_with_only_author_review=rollup.pct_merged_with_only_author_review,
+        median_comments_per_pr=rollup.median_comments_per_pr,
+        fast_approval_count=rollup.fast_approval_count,
+        self_merge_count=rollup.self_merge_count,
+        examples=_examples(merged, rollup.no_review_prs, rollup.fast_approval_prs),
+        repos=repos,
+        definitions=defs,
+    )
+
+
+def _aggregate(
+    merged: list[NormalizedPR],
+    *,
+    fast_approval_min_lines: int,
+    fast_approval_max_seconds: float,
+) -> _RollupValues:
     n = len(merged)
     reviewer_counts: list[int] = []
     no_review: list[NormalizedPR] = []
@@ -86,12 +140,9 @@ def compute_review_health(
             self_merges.append(pr)
 
     def _pct(items: list[NormalizedPR]) -> float | None:
-        return round2(100.0 * len(items) / n)
+        return round2(100.0 * len(items) / n) if n else None
 
-    return ReviewHealthStats(
-        repo=repo,
-        since=since,
-        until=until,
+    return _RollupValues(
         count=n,
         median_reviewers_per_pr=round2(median_or_none(reviewer_counts)),
         pct_merged_without_review=_pct(no_review),
@@ -101,9 +152,41 @@ def compute_review_health(
         ),
         fast_approval_count=len(fast_approvals),
         self_merge_count=len(self_merges),
-        examples=_examples(merged, no_review, fast_approvals),
-        definitions=defs,
+        no_review_prs=no_review,
+        fast_approval_prs=fast_approvals,
     )
+
+
+def _per_repo_slices(
+    merged: list[NormalizedPR],
+    *,
+    fast_approval_min_lines: int,
+    fast_approval_max_seconds: float,
+) -> list[ReviewHealthRepoSlice]:
+    slices: list[ReviewHealthRepoSlice] = []
+    by_repo = sorted(merged, key=lambda p: p.repo)
+    for repo, group_iter in groupby(by_repo, key=lambda p: p.repo):
+        group = list(group_iter)
+        rollup = _aggregate(
+            group,
+            fast_approval_min_lines=fast_approval_min_lines,
+            fast_approval_max_seconds=fast_approval_max_seconds,
+        )
+        slices.append(
+            ReviewHealthRepoSlice(
+                repo=repo,
+                count=rollup.count,
+                median_reviewers_per_pr=rollup.median_reviewers_per_pr,
+                pct_merged_without_review=rollup.pct_merged_without_review,
+                pct_merged_with_only_author_review=(
+                    rollup.pct_merged_with_only_author_review
+                ),
+                median_comments_per_pr=rollup.median_comments_per_pr,
+                fast_approval_count=rollup.fast_approval_count,
+                self_merge_count=rollup.self_merge_count,
+            )
+        )
+    return slices
 
 
 # ---------------------------------------------------------------------------

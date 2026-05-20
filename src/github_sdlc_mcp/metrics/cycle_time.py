@@ -1,9 +1,11 @@
-"""PR cycle-time statistics over a window of merged PRs."""
+"""PR cycle-time statistics over a window of merged PRs across an org."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from datetime import date, datetime
+from itertools import groupby
 
 from github_sdlc_mcp.metrics._stats import (
     example_for_pr,
@@ -14,7 +16,12 @@ from github_sdlc_mcp.metrics._stats import (
     round2,
 )
 from github_sdlc_mcp.metrics.definitions import definitions_for
-from github_sdlc_mcp.models import ExamplePR, NormalizedPR, PRCycleTimeStats
+from github_sdlc_mcp.models import (
+    CycleTimeRepoSlice,
+    ExamplePR,
+    NormalizedPR,
+    PRCycleTimeStats,
+)
 
 _DEFINITION_KEYS = (
     "cycle_time_total",
@@ -23,20 +30,33 @@ _DEFINITION_KEYS = (
 )
 
 
+@dataclass
+class _RollupValues:
+    count: int
+    median: float | None
+    p90: float | None
+    mean: float | None
+    median_first_review: float | None
+    median_approval_to_merge: float | None
+    cycle_hours_by_number: dict[int, float] = field(default_factory=dict)
+
 def compute_cycle_time_stats(
     *,
-    repo: str,
+    org: str,
     since: date,
     until: date,
     prs: Iterable[NormalizedPR],
 ) -> PRCycleTimeStats:
-    """Cycle-time statistics over PRs merged within ``[since, until]`` (UTC)."""
+    """Cycle-time statistics over PRs merged within ``[since, until]`` (UTC).
+
+    Computes both the org-level rollup and a per-repo breakdown.
+    """
     merged = [pr for pr in prs if merged_in_window(pr, since, until)]
     defs = definitions_for(*_DEFINITION_KEYS)
 
     if not merged:
         return PRCycleTimeStats(
-            repo=repo,
+            org=org,
             since=since,
             until=until,
             count=0,
@@ -46,35 +66,68 @@ def compute_cycle_time_stats(
             median_time_to_first_review_hours=None,
             median_approval_to_merge_hours=None,
             examples=[],
+            repos=[],
             definitions=defs,
         )
 
-    cycle_hours = {pr.number: _cycle_hours(pr) for pr in merged}
-    first_review_hours = [
-        h for pr in merged if (h := _first_non_author_review_hours(pr)) is not None
-    ]
-    approval_to_merge_hours = [
-        h for pr in merged if (h := _approval_to_merge_hours(pr)) is not None
-    ]
-
-    values = list(cycle_hours.values())
-    median = median_or_none(values)
-    p90 = percentile(values, 0.9) if len(values) > 1 else values[0]
-    mean = mean_or_none(values)
+    repos = _per_repo_slices(merged)
+    rollup = _aggregate(merged)
 
     return PRCycleTimeStats(
-        repo=repo,
+        org=org,
         since=since,
         until=until,
-        count=len(merged),
-        median_hours=round2(median),
-        p90_hours=round2(p90),
-        mean_hours=round2(mean),
-        median_time_to_first_review_hours=round2(median_or_none(first_review_hours)),
-        median_approval_to_merge_hours=round2(median_or_none(approval_to_merge_hours)),
-        examples=_examples(merged, cycle_hours, median),
+        count=rollup.count,
+        median_hours=round2(rollup.median),
+        p90_hours=round2(rollup.p90),
+        mean_hours=round2(rollup.mean),
+        median_time_to_first_review_hours=round2(rollup.median_first_review),
+        median_approval_to_merge_hours=round2(rollup.median_approval_to_merge),
+        examples=_examples(merged, rollup.cycle_hours_by_number, rollup.median),
+        repos=repos,
         definitions=defs,
     )
+
+
+def _aggregate(merged: list[NormalizedPR]) -> _RollupValues:
+    cycle_hours = {pr.number: _cycle_hours(pr) for pr in merged}
+    first_review = [
+        h for pr in merged if (h := _first_non_author_review_hours(pr)) is not None
+    ]
+    approval_to_merge = [
+        h for pr in merged if (h := _approval_to_merge_hours(pr)) is not None
+    ]
+    values = list(cycle_hours.values())
+    p90 = percentile(values, 0.9) if len(values) > 1 else values[0]
+    return _RollupValues(
+        count=len(merged),
+        median=median_or_none(values),
+        p90=p90,
+        mean=mean_or_none(values),
+        median_first_review=median_or_none(first_review),
+        median_approval_to_merge=median_or_none(approval_to_merge),
+        cycle_hours_by_number=cycle_hours,
+    )
+
+
+def _per_repo_slices(merged: list[NormalizedPR]) -> list[CycleTimeRepoSlice]:
+    slices: list[CycleTimeRepoSlice] = []
+    by_repo = sorted(merged, key=lambda p: p.repo)
+    for repo, group_iter in groupby(by_repo, key=lambda p: p.repo):
+        group = list(group_iter)
+        rollup = _aggregate(group)
+        slices.append(
+            CycleTimeRepoSlice(
+                repo=repo,
+                count=rollup.count,
+                median_hours=round2(rollup.median),
+                p90_hours=round2(rollup.p90),
+                mean_hours=round2(rollup.mean),
+                median_time_to_first_review_hours=round2(rollup.median_first_review),
+                median_approval_to_merge_hours=round2(rollup.median_approval_to_merge),
+            )
+        )
+    return slices
 
 
 # ---------------------------------------------------------------------------

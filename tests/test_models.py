@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, date, datetime
-from pathlib import Path
 from typing import TypeVar, cast
 
 import pytest
@@ -26,12 +25,13 @@ from github_sdlc_mcp.models import (
     AggregateResponse,
     BaselineComparison,
     CacheClearResult,
+    CIHealthRepoSlice,
     CIHealthStats,
-    ConfiguredRepo,
-    ConfiguredRepoList,
+    CycleTimeRepoSlice,
     ExamplePR,
     FailingCheck,
     HealthStatus,
+    MergeActivityRepoSlice,
     MergeActivityStats,
     NormalizedCheckRun,
     NormalizedCommit,
@@ -42,10 +42,13 @@ from github_sdlc_mcp.models import (
     PRCycleTimeStats,
     ProviderResponse,
     PRSizeBuckets,
+    PRSizeRepoSlice,
     PRSizeStats,
+    ReviewHealthRepoSlice,
     ReviewHealthStats,
     StalePR,
     StalePRList,
+    StaleRepoSlice,
     WeeklyBucket,
 )
 
@@ -74,7 +77,6 @@ def _example(label: str = "slowest", value: float = 42.0, unit: str = "hours") -
 def _all_response_models() -> list[type[ProviderResponse]]:
     """Every concrete ProviderResponse subclass we ship."""
     return [
-        ConfiguredRepoList,
         ActiveRepoList,
         HealthStatus,
         PRCycleTimeStats,
@@ -98,26 +100,17 @@ T = TypeVar("T", bound=ProviderResponse)
 
 def _sample_instance(cls: type[T]) -> T:
     """Build a minimal valid instance of each model for serialization tests."""
-    if cls is ConfiguredRepoList:
-        return cast(T, ConfiguredRepoList(
-            repos=[
-                ConfiguredRepo(
-                    owner="o", repo="r", company_label="C", github_host="cloud"
-                )
-            ]
-        ))
     if cls is ActiveRepoList:
         return cast(T, ActiveRepoList(
+            org="acme",
             since=SINCE,
             until=UNTIL,
-            total_repos_configured=5,
             total_repos_scanned=5,
             total_repos_active=3,
             repos=[
                 ActiveRepo(
-                    owner="o",
+                    owner="acme",
                     repo="r",
-                    company_label="C",
                     pushed_at=NOW,
                     default_branch="main",
                     has_merges_in_window=True,
@@ -134,14 +127,10 @@ def _sample_instance(cls: type[T]) -> T:
             rate_limit_resets_at=NOW,
             last_successful_call_at=NOW,
             cache_entries=0,
-            config_status="loaded",
-            config_path=Path("/etc/repos.yaml"),
-            config_searched_paths=[Path("/etc/repos.yaml")],
-            config_error=None,
         ))
     if cls is PRCycleTimeStats:
         return cast(T, PRCycleTimeStats(
-            repo="o/r",
+            org="acme",
             since=SINCE,
             until=UNTIL,
             count=10,
@@ -151,6 +140,17 @@ def _sample_instance(cls: type[T]) -> T:
             median_time_to_first_review_hours=2.0,
             median_approval_to_merge_hours=4.0,
             examples=[_example()],
+            repos=[
+                CycleTimeRepoSlice(
+                    repo="web",
+                    count=10,
+                    median_hours=12.0,
+                    p90_hours=48.0,
+                    mean_hours=18.5,
+                    median_time_to_first_review_hours=2.0,
+                    median_approval_to_merge_hours=4.0,
+                )
+            ],
             definitions=definitions_for(
                 "cycle_time_total",
                 "cycle_time_first_review",
@@ -159,7 +159,7 @@ def _sample_instance(cls: type[T]) -> T:
         ))
     if cls is PRSizeStats:
         return cast(T, PRSizeStats(
-            repo="o/r",
+            org="acme",
             since=SINCE,
             until=UNTIL,
             count=10,
@@ -168,11 +168,21 @@ def _sample_instance(cls: type[T]) -> T:
             median_files_changed=3.0,
             distribution_buckets=PRSizeBuckets(xs=2, s=4, m=3, l=1, xl=0),
             examples=[_example(label="largest", value=1500, unit="lines")],
+            repos=[
+                PRSizeRepoSlice(
+                    repo="web",
+                    count=10,
+                    median_lines_changed=80.0,
+                    p90_lines_changed=500.0,
+                    median_files_changed=3.0,
+                    distribution_buckets=PRSizeBuckets(xs=2, s=4, m=3, l=1, xl=0),
+                )
+            ],
             definitions=definitions_for("pr_size_lines", "pr_size_files", "pr_size_bucket"),
         ))
     if cls is ReviewHealthStats:
         return cast(T, ReviewHealthStats(
-            repo="o/r",
+            org="acme",
             since=SINCE,
             until=UNTIL,
             count=10,
@@ -183,6 +193,18 @@ def _sample_instance(cls: type[T]) -> T:
             fast_approval_count=1,
             self_merge_count=2,
             examples=[_example(label="no_review", value=0, unit="count")],
+            repos=[
+                ReviewHealthRepoSlice(
+                    repo="web",
+                    count=10,
+                    median_reviewers_per_pr=1.0,
+                    pct_merged_without_review=10.0,
+                    pct_merged_with_only_author_review=0.0,
+                    median_comments_per_pr=3.0,
+                    fast_approval_count=1,
+                    self_merge_count=2,
+                )
+            ],
             definitions=definitions_for(
                 "review_reviewers_per_pr",
                 "review_no_review",
@@ -194,7 +216,7 @@ def _sample_instance(cls: type[T]) -> T:
         ))
     if cls is CIHealthStats:
         return cast(T, CIHealthStats(
-            repo="o/r",
+            org="acme",
             since=SINCE,
             until=UNTIL,
             pr_count=10,
@@ -203,6 +225,15 @@ def _sample_instance(cls: type[T]) -> T:
             top_failing_checks=[FailingCheck(name="lint", count=3)],
             median_failed_runs_per_pr=0.0,
             examples=[_example(label="most_failures", value=5, unit="count")],
+            repos=[
+                CIHealthRepoSlice(
+                    repo="web",
+                    pr_count=10,
+                    pct_with_failing_check=20.0,
+                    pct_with_flaky_check=5.0,
+                    median_failed_runs_per_pr=0.0,
+                )
+            ],
             definitions=definitions_for(
                 "ci_failing_check",
                 "ci_flaky_check",
@@ -211,51 +242,58 @@ def _sample_instance(cls: type[T]) -> T:
             ),
         ))
     if cls is StalePRList:
+        stale_pr = StalePR(
+            number=42,
+            title="Old work",
+            author="alice",
+            age_days=30,
+            last_activity=NOW,
+            url="https://github.com/o/r/pull/42",
+        )
         return cast(T, StalePRList(
-            repo="o/r",
+            org="acme",
             as_of=UNTIL,
             threshold_days=14,
             count=1,
-            prs=[
-                StalePR(
-                    number=42,
-                    title="Old work",
-                    author="alice",
-                    age_days=30,
-                    last_activity=NOW,
-                    url="https://github.com/o/r/pull/42",
-                )
+            prs=[stale_pr],
+            repos=[
+                StaleRepoSlice(repo="web", count=1, prs=[stale_pr]),
             ],
             definitions=definitions_for("stale_pr"),
         ))
     if cls is MergeActivityStats:
+        bucket = WeeklyBucket(week_starting=date(2026, 4, 27), count=3)
         return cast(T, MergeActivityStats(
-            repo="o/r",
+            org="acme",
             since=SINCE,
             until=UNTIL,
-            merges_to_default_branch=[
-                WeeklyBucket(week_starting=date(2026, 4, 27), count=3),
-            ],
+            merges_to_default_branch=[bucket],
             revert_commit_count=1,
             merge_frequency_per_week=3.0,
+            repos=[
+                MergeActivityRepoSlice(
+                    repo="web",
+                    merges_to_default_branch=[bucket],
+                    revert_commit_count=1,
+                    merge_frequency_per_week=3.0,
+                )
+            ],
             definitions=definitions_for(
                 "merge_to_default_branch", "revert_commit", "merge_frequency_per_week"
             ),
         ))
     if cls is PortfolioSummary:
         return cast(T, PortfolioSummary(
+            org="acme",
             since=SINCE,
             until=UNTIL,
-            company_filter=None,
             include_inactive=False,
-            total_repos_configured=5,
             total_repos_active=3,
             total_repos_with_merges=2,
             repos=[
                 PortfolioRepoEntry(
-                    owner="o",
+                    owner="acme",
                     repo="r",
-                    company_label="C",
                     has_merges_in_window=True,
                     inactive_in_window=False,
                     cycle_time_median=12.0,
@@ -280,7 +318,7 @@ def _sample_instance(cls: type[T]) -> T:
         ))
     if cls is BaselineComparison:
         return cast(T, BaselineComparison(
-            repo="o/r",
+            org="acme",
             metric="cycle_time_median_hours",
             current_window_days=30,
             baseline_window_days=90,
@@ -292,7 +330,7 @@ def _sample_instance(cls: type[T]) -> T:
             definitions=definitions_for("baseline_pct_change", "baseline_significance"),
         ))
     if cls is CacheClearResult:
-        return cast(T, CacheClearResult(scope="all", repo=None, entries_cleared=12))
+        return cast(T, CacheClearResult(scope="all", org=None, entries_cleared=12))
     raise AssertionError(f"no sample factory for {cls!r}")
 
 
@@ -345,6 +383,70 @@ def test_all_definitions_referenced_by_some_response() -> None:
         referenced.update(_sample_instance(cls).definitions.keys())
     orphans = set(DEFINITIONS) - referenced
     assert not orphans, f"definitions not used by any response: {sorted(orphans)}"
+
+
+# ---------------------------------------------------------------------------
+# Per-repo slice round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_cycle_time_repo_slice_round_trip() -> None:
+    s = CycleTimeRepoSlice(
+        repo="web",
+        count=5,
+        median_hours=10.0,
+        p90_hours=20.0,
+        mean_hours=12.0,
+        median_time_to_first_review_hours=2.0,
+        median_approval_to_merge_hours=4.0,
+    )
+    again = CycleTimeRepoSlice.model_validate_json(s.model_dump_json())
+    assert again == s
+
+
+def test_review_health_repo_slice_round_trip() -> None:
+    s = ReviewHealthRepoSlice(
+        repo="web",
+        count=5,
+        median_reviewers_per_pr=1.0,
+        pct_merged_without_review=20.0,
+        pct_merged_with_only_author_review=0.0,
+        median_comments_per_pr=3.0,
+        fast_approval_count=1,
+        self_merge_count=0,
+    )
+    again = ReviewHealthRepoSlice.model_validate_json(s.model_dump_json())
+    assert again == s
+
+
+def test_stale_repo_slice_round_trip() -> None:
+    s = StaleRepoSlice(
+        repo="web",
+        count=1,
+        prs=[
+            StalePR(
+                number=42,
+                title="Old",
+                author="a",
+                age_days=30,
+                last_activity=NOW,
+                url="u",
+            )
+        ],
+    )
+    again = StaleRepoSlice.model_validate_json(s.model_dump_json())
+    assert again == s
+
+
+def test_merge_activity_repo_slice_round_trip() -> None:
+    s = MergeActivityRepoSlice(
+        repo="web",
+        merges_to_default_branch=[WeeklyBucket(week_starting=date(2026, 4, 27), count=2)],
+        revert_commit_count=0,
+        merge_frequency_per_week=2.0,
+    )
+    again = MergeActivityRepoSlice.model_validate_json(s.model_dump_json())
+    assert again == s
 
 
 def test_naive_datetime_rejected_on_normalized_pr() -> None:
@@ -403,7 +505,6 @@ def test_portfolio_percentile_out_of_range_rejected() -> None:
         PortfolioRepoEntry(
             owner="o",
             repo="r",
-            company_label="C",
             has_merges_in_window=True,
             inactive_in_window=False,
             cycle_time_median=10.0,

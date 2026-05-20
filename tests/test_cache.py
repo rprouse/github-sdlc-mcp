@@ -192,32 +192,32 @@ async def test_clear_all_empties_and_returns_count() -> None:
 
 
 @pytest.mark.asyncio
-async def test_clear_repo_scoped_only_drops_matching_entries() -> None:
+async def test_clear_org_scoped_only_drops_matching_entries() -> None:
     cache = TTLCache()
-    await cache.set("get_cycle", {"repo": "o/a"}, "ra")
-    await cache.set("get_cycle", {"repo": "o/b"}, "rb")
-    await cache.set("get_active", {"since": date(2026, 5, 1)}, "no-repo")
+    await cache.set("get_cycle", {"org": "acme"}, "ra")
+    await cache.set("get_cycle", {"org": "beta"}, "rb")
+    await cache.set("get_active", {"since": date(2026, 5, 1)}, "no-org")
 
-    cleared = await cache.clear(scope="repo", repo="o/a")
+    cleared = await cache.clear(scope="org", org="acme")
 
     assert cleared == 1
-    assert await cache.get("get_cycle", {"repo": "o/a"}) is None
-    assert await cache.get("get_cycle", {"repo": "o/b"}) == "rb"
-    assert await cache.get("get_active", {"since": date(2026, 5, 1)}) == "no-repo"
+    assert await cache.get("get_cycle", {"org": "acme"}) is None
+    assert await cache.get("get_cycle", {"org": "beta"}) == "rb"
+    assert await cache.get("get_active", {"since": date(2026, 5, 1)}) == "no-org"
 
 
 @pytest.mark.asyncio
-async def test_clear_repo_requires_repo_arg() -> None:
+async def test_clear_org_requires_org_arg() -> None:
     cache = TTLCache()
     with pytest.raises(ValueError):
-        await cache.clear(scope="repo")
+        await cache.clear(scope="org")
 
 
 @pytest.mark.asyncio
-async def test_clear_repo_with_unmatched_value_returns_zero() -> None:
+async def test_clear_org_with_unmatched_value_returns_zero() -> None:
     cache = TTLCache()
-    await cache.set("get_cycle", {"repo": "o/a"}, "ra")
-    cleared = await cache.clear(scope="repo", repo="o/does-not-exist")
+    await cache.set("get_cycle", {"org": "acme"}, "ra")
+    cleared = await cache.clear(scope="org", org="does-not-exist")
     assert cleared == 0
     assert await cache.size() == 1
 

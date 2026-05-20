@@ -1,8 +1,8 @@
 """Async GitHub HTTP client: GraphQL + REST + pagination + rate-limit aware.
 
-One :class:`GitHubClient` owns one ``httpx.AsyncClient`` and serves one host
-(cloud github.com OR a Enterprise Server endpoint). A :class:`GitHubClientPool`
-multiplexes by host key from :class:`AppConfig`.
+One :class:`GitHubClient` owns one ``httpx.AsyncClient`` and serves the cloud
+``api.github.com`` host. Construct via :func:`make_github_client`, which reads
+``GITHUB_TOKEN`` (falling back to ``GH_TOKEN``) from the environment.
 
 The client deliberately exposes a tiny surface: ``graphql``, ``paginate_graphql``,
 and ``rest_get``. Query strings and response interpretation belong with the
@@ -22,7 +22,7 @@ from typing import Any
 import httpx
 
 from github_sdlc_mcp import __version__
-from github_sdlc_mcp.client.auth import resolve_token
+from github_sdlc_mcp.client.auth import resolve_github_token
 from github_sdlc_mcp.client.rate_limit import (
     EMPTY_RATE_LIMIT_STATE,
     GitHubGraphQLError,
@@ -33,7 +33,6 @@ from github_sdlc_mcp.client.rate_limit import (
     parse_rate_limit_headers,
     retry_after_seconds,
 )
-from github_sdlc_mcp.config import GitHubHost
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +40,17 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_RATE_LIMIT_FLOOR = 100
 DEFAULT_MAX_RETRIES = 5
 DEFAULT_BACKOFF_BASE = 0.5  # seconds; exponential
+DEFAULT_BASE_URL = "https://api.github.com"
 
 
 class GitHubClient:
-    """Async client for a single configured GitHub host."""
+    """Async client for cloud GitHub (``api.github.com``)."""
 
     def __init__(
         self,
-        host_cfg: GitHubHost,
-        token: str,
         *,
-        host_label: str = "github",
+        token: str,
+        base_url: str = DEFAULT_BASE_URL,
         rate_limit_floor: int = DEFAULT_RATE_LIMIT_FLOOR,
         max_retries: int = DEFAULT_MAX_RETRIES,
         backoff_base: float = DEFAULT_BACKOFF_BASE,
@@ -60,8 +59,6 @@ class GitHubClient:
         user_agent: str = f"github-sdlc-mcp/{__version__}",
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
-        self._host_cfg = host_cfg
-        self._host_label = host_label
         self._token = token
         self._rate_limit_floor = rate_limit_floor
         self._max_retries = max_retries
@@ -69,9 +66,8 @@ class GitHubClient:
         self._sleep = sleep or asyncio.sleep
         self._rate_limit: RateLimitState = EMPTY_RATE_LIMIT_STATE
         self._last_success_at: datetime | None = None
-        base_url = str(host_cfg.base_url).rstrip("/")
         self._client = httpx.AsyncClient(
-            base_url=base_url,
+            base_url=base_url.rstrip("/"),
             timeout=timeout,
             transport=transport,
             headers={
@@ -91,10 +87,6 @@ class GitHubClient:
     @property
     def last_successful_call_at(self) -> datetime | None:
         return self._last_success_at
-
-    @property
-    def host_label(self) -> str:
-        return self._host_label
 
     # ---- public methods ---------------------------------------------------
 
@@ -145,7 +137,11 @@ class GitHubClient:
             for key in connection_path:
                 if not isinstance(conn, dict) or key not in conn:
                     raise GitHubGraphQLError(
-                        [{"message": f"connection_path {list(connection_path)} not found in response"}]
+                        [
+                            {
+                                "message": f"connection_path {list(connection_path)} not found in response"
+                            }
+                        ]
                     )
                 conn = conn[key]
             if not isinstance(conn, dict):
@@ -284,45 +280,22 @@ class GitHubClient:
         return "fatal"
 
 
-class GitHubClientPool:
-    """Lazily construct one :class:`GitHubClient` per configured host."""
+def make_github_client(
+    *,
+    env: Mapping[str, str] | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+    sleep: Callable[[float], Awaitable[None]] | None = None,
+) -> GitHubClient:
+    """Construct a single GitHubClient bound to api.github.com.
 
-    def __init__(
-        self,
-        hosts: dict[str, GitHubHost],
-        *,
-        env: Mapping[str, str] | None = None,
-        sleep: Callable[[float], Awaitable[None]] | None = None,
-        transport: httpx.AsyncBaseTransport | None = None,
-    ) -> None:
-        self._hosts = hosts
-        self._env = env
-        self._sleep = sleep
-        self._transport = transport
-        self._clients: dict[str, GitHubClient] = {}
-
-    def get(self, host_key: str) -> GitHubClient:
-        if host_key in self._clients:
-            return self._clients[host_key]
-        if host_key not in self._hosts:
-            raise KeyError(f"Unknown host '{host_key}'. Configured: {sorted(self._hosts)}")
-        cfg = self._hosts[host_key]
-        token = resolve_token(cfg, host_label=host_key, env=self._env)
-        client = GitHubClient(
-            cfg,
-            token,
-            host_label=host_key,
-            sleep=self._sleep,
-            transport=self._transport,
-        )
-        self._clients[host_key] = client
-        return client
-
-    @property
-    def active_host_keys(self) -> list[str]:
-        return list(self._clients.keys())
-
-    async def aclose(self) -> None:
-        for client in self._clients.values():
-            await client.aclose()
-        self._clients.clear()
+    ``transport`` is the respx injection point for tests. ``sleep`` is
+    likewise injectable so rate-limit tests assert exact pause durations.
+    The token is read from ``GITHUB_TOKEN`` (or ``GH_TOKEN`` as a fallback).
+    """
+    token = resolve_github_token(env)
+    return GitHubClient(
+        token=token,
+        base_url=DEFAULT_BASE_URL,
+        transport=transport,
+        sleep=sleep,
+    )

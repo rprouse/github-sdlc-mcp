@@ -1,27 +1,21 @@
 """Pydantic response models for every tool, plus internal normalized models.
 
-These shapes are the **cross-server contract**. The planned sibling servers
-``gitlab-sdlc-mcp`` and ``azdo-sdlc-mcp`` must reproduce them exactly so an
-orchestrator can merge results from multiple servers without per-provider
-branching. Field names here are deliberately provider-neutral — no
-``head_sha``, ``pull_request_id`` etc. leaks into response models.
+These shapes are the **cross-server contract**. The planned sibling
+servers ``gitlab-sdlc-mcp`` and ``azdo-sdlc-mcp`` must reproduce them
+exactly so an orchestrator can merge results from multiple servers
+without per-provider branching. Field names here are deliberately
+provider-neutral.
 
-Datetime fields are required to be timezone-aware. The convention is UTC;
-naive datetimes are rejected at validation time.
-
-See ``metrics/definitions.py`` for the canonical metric-definition strings
-that every aggregate response embeds in its ``definitions`` field.
+Datetime fields are required to be timezone-aware (UTC).
 """
 
 from __future__ import annotations
 
 from datetime import date
-from pathlib import Path
 from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
-# Re-export for clarity in downstream code.
 ReviewState = Literal[
     "approved", "changes_requested", "commented", "dismissed", "pending"
 ]
@@ -78,9 +72,9 @@ class ExamplePR(_Strict):
     title: str
     author: str
     url: str
-    label: str         # e.g. "slowest", "largest", "no_review", "fast_approval"
-    value: float       # the metric value that made this PR representative
-    unit: str          # e.g. "hours", "lines", "files", "comments", "count"
+    label: str
+    value: float
+    unit: str
 
 
 # ---------------------------------------------------------------------------
@@ -142,34 +136,22 @@ class NormalizedPR(_Strict):
 
 
 # ---------------------------------------------------------------------------
-# Discovery / config tool responses
+# Discovery tool responses
 # ---------------------------------------------------------------------------
-
-
-class ConfiguredRepo(_Strict):
-    owner: str
-    repo: str
-    company_label: str
-    github_host: str
-
-
-class ConfiguredRepoList(ProviderResponse):
-    repos: list[ConfiguredRepo]
 
 
 class ActiveRepo(_Strict):
     owner: str
     repo: str
-    company_label: str
     pushed_at: AwareDatetime
     default_branch: str
     has_merges_in_window: bool
 
 
 class ActiveRepoList(AggregateResponse):
+    org: str
     since: date
     until: date
-    total_repos_configured: int
     total_repos_scanned: int
     total_repos_active: int
     repos: list[ActiveRepo]
@@ -181,28 +163,11 @@ class HealthStatus(ProviderResponse):
     rate_limit_resets_at: AwareDatetime | None
     last_successful_call_at: AwareDatetime | None
     cache_entries: int
-    config_status: Literal["loaded", "not_found", "error"]
-    config_path: Path | None
-    config_searched_paths: list[Path]
-    config_error: str | None
 
 
 # ---------------------------------------------------------------------------
-# Per-repo metric responses
+# Building-block types referenced by per-repo slices and aggregate responses
 # ---------------------------------------------------------------------------
-
-
-class PRCycleTimeStats(AggregateResponse):
-    repo: str
-    since: date
-    until: date
-    count: int
-    median_hours: float | None
-    p90_hours: float | None
-    mean_hours: float | None
-    median_time_to_first_review_hours: float | None
-    median_approval_to_merge_hours: float | None
-    examples: list[ExamplePR]
 
 
 class PRSizeBuckets(_Strict):
@@ -215,49 +180,6 @@ class PRSizeBuckets(_Strict):
     xl: int = Field(ge=0)
 
 
-class PRSizeStats(AggregateResponse):
-    repo: str
-    since: date
-    until: date
-    count: int
-    median_lines_changed: float | None
-    p90_lines_changed: float | None
-    median_files_changed: float | None
-    distribution_buckets: PRSizeBuckets
-    examples: list[ExamplePR]
-
-
-class ReviewHealthStats(AggregateResponse):
-    repo: str
-    since: date
-    until: date
-    count: int
-    median_reviewers_per_pr: float | None
-    pct_merged_without_review: float | None
-    pct_merged_with_only_author_review: float | None
-    median_comments_per_pr: float | None
-    fast_approval_count: int
-    self_merge_count: int
-    examples: list[ExamplePR]
-
-
-class FailingCheck(_Strict):
-    name: str
-    count: int
-
-
-class CIHealthStats(AggregateResponse):
-    repo: str
-    since: date
-    until: date
-    pr_count: int
-    pct_with_failing_check: float | None
-    pct_with_flaky_check: float | None
-    top_failing_checks: list[FailingCheck]
-    median_failed_runs_per_pr: float | None
-    examples: list[ExamplePR]
-
-
 class StalePR(_Strict):
     number: int
     title: str
@@ -265,14 +187,6 @@ class StalePR(_Strict):
     age_days: int
     last_activity: AwareDatetime
     url: str
-
-
-class StalePRList(AggregateResponse):
-    repo: str
-    as_of: date
-    threshold_days: int
-    count: int
-    prs: list[StalePR]
 
 
 class WeeklyBucket(_Strict):
@@ -292,13 +206,144 @@ class WeeklyBucket(_Strict):
         return v
 
 
-class MergeActivityStats(AggregateResponse):
+class FailingCheck(_Strict):
+    name: str
+    count: int
+
+
+# ---------------------------------------------------------------------------
+# Per-repo metric slices
+# ---------------------------------------------------------------------------
+
+
+class CycleTimeRepoSlice(_Strict):
     repo: str
+    count: int
+    median_hours: float | None
+    p90_hours: float | None
+    mean_hours: float | None
+    median_time_to_first_review_hours: float | None
+    median_approval_to_merge_hours: float | None
+
+
+class PRSizeRepoSlice(_Strict):
+    repo: str
+    count: int
+    median_lines_changed: float | None
+    p90_lines_changed: float | None
+    median_files_changed: float | None
+    distribution_buckets: PRSizeBuckets
+
+
+class ReviewHealthRepoSlice(_Strict):
+    repo: str
+    count: int
+    median_reviewers_per_pr: float | None
+    pct_merged_without_review: float | None
+    pct_merged_with_only_author_review: float | None
+    median_comments_per_pr: float | None
+    fast_approval_count: int
+    self_merge_count: int
+
+
+class CIHealthRepoSlice(_Strict):
+    repo: str
+    pr_count: int
+    pct_with_failing_check: float | None
+    pct_with_flaky_check: float | None
+    median_failed_runs_per_pr: float | None
+
+
+class StaleRepoSlice(_Strict):
+    repo: str
+    count: int
+    prs: list[StalePR]
+
+
+class MergeActivityRepoSlice(_Strict):
+    repo: str
+    merges_to_default_branch: list[WeeklyBucket]
+    revert_commit_count: int
+    merge_frequency_per_week: float
+
+
+# ---------------------------------------------------------------------------
+# Org-aggregate metric responses
+# ---------------------------------------------------------------------------
+
+
+class PRCycleTimeStats(AggregateResponse):
+    org: str
+    since: date
+    until: date
+    count: int
+    median_hours: float | None
+    p90_hours: float | None
+    mean_hours: float | None
+    median_time_to_first_review_hours: float | None
+    median_approval_to_merge_hours: float | None
+    examples: list[ExamplePR]
+    repos: list[CycleTimeRepoSlice]
+
+
+class PRSizeStats(AggregateResponse):
+    org: str
+    since: date
+    until: date
+    count: int
+    median_lines_changed: float | None
+    p90_lines_changed: float | None
+    median_files_changed: float | None
+    distribution_buckets: PRSizeBuckets
+    examples: list[ExamplePR]
+    repos: list[PRSizeRepoSlice]
+
+
+class ReviewHealthStats(AggregateResponse):
+    org: str
+    since: date
+    until: date
+    count: int
+    median_reviewers_per_pr: float | None
+    pct_merged_without_review: float | None
+    pct_merged_with_only_author_review: float | None
+    median_comments_per_pr: float | None
+    fast_approval_count: int
+    self_merge_count: int
+    examples: list[ExamplePR]
+    repos: list[ReviewHealthRepoSlice]
+
+
+class CIHealthStats(AggregateResponse):
+    org: str
+    since: date
+    until: date
+    pr_count: int
+    pct_with_failing_check: float | None
+    pct_with_flaky_check: float | None
+    top_failing_checks: list[FailingCheck]
+    median_failed_runs_per_pr: float | None
+    examples: list[ExamplePR]
+    repos: list[CIHealthRepoSlice]
+
+
+class StalePRList(AggregateResponse):
+    org: str
+    as_of: date
+    threshold_days: int
+    count: int
+    prs: list[StalePR]
+    repos: list[StaleRepoSlice]
+
+
+class MergeActivityStats(AggregateResponse):
+    org: str
     since: date
     until: date
     merges_to_default_branch: list[WeeklyBucket]
     revert_commit_count: int
     merge_frequency_per_week: float
+    repos: list[MergeActivityRepoSlice]
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +354,6 @@ class MergeActivityStats(AggregateResponse):
 class PortfolioRepoEntry(_Strict):
     owner: str
     repo: str
-    company_label: str
     has_merges_in_window: bool
     inactive_in_window: bool
     cycle_time_median: float | None
@@ -326,18 +370,17 @@ class PortfolioRepoEntry(_Strict):
 
 
 class PortfolioSummary(AggregateResponse):
+    org: str
     since: date
     until: date
-    company_filter: str | None
     include_inactive: bool
-    total_repos_configured: int
     total_repos_active: int
     total_repos_with_merges: int
     repos: list[PortfolioRepoEntry]
 
 
 class BaselineComparison(AggregateResponse):
-    repo: str
+    org: str
     metric: str
     current_window_days: int
     baseline_window_days: int
@@ -354,8 +397,8 @@ class BaselineComparison(AggregateResponse):
 
 
 class CacheClearResult(ProviderResponse):
-    scope: Literal["all", "repo"]
-    repo: str | None
+    scope: Literal["all", "org"]
+    org: str | None
     entries_cleared: int
 
 
@@ -364,15 +407,16 @@ __all__ = [
     "ActiveRepoList",
     "AggregateResponse",
     "BaselineComparison",
+    "CIHealthRepoSlice",
     "CIHealthStats",
     "CacheClearResult",
     "CheckConclusion",
     "CheckStatus",
-    "ConfiguredRepo",
-    "ConfiguredRepoList",
+    "CycleTimeRepoSlice",
     "ExamplePR",
     "FailingCheck",
     "HealthStatus",
+    "MergeActivityRepoSlice",
     "MergeActivityStats",
     "NormalizedCheckRun",
     "NormalizedCommit",
@@ -380,13 +424,16 @@ __all__ = [
     "NormalizedReview",
     "PRCycleTimeStats",
     "PRSizeBuckets",
+    "PRSizeRepoSlice",
     "PRSizeStats",
     "PortfolioRepoEntry",
     "PortfolioSummary",
     "ProviderResponse",
+    "ReviewHealthRepoSlice",
     "ReviewHealthStats",
     "ReviewState",
     "StalePR",
     "StalePRList",
+    "StaleRepoSlice",
     "WeeklyBucket",
 ]

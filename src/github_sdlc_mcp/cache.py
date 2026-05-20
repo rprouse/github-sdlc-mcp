@@ -6,7 +6,7 @@ Postgres-backed cache can drop in without changing any call sites. That's why
 this is async even though the in-memory version has no real I/O.
 
 Spec: 15-minute default TTL, keyed by ``(tool_name, sorted_kwargs)``,
-scope="repo" support for ``clear_cache``.
+scope="org" support for ``clear_cache``.
 """
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ class Cache(Protocol):
     async def clear(
         self,
         *,
-        scope: Literal["all", "repo"] = "all",
-        repo: str | None = None,
+        scope: Literal["all", "org"] = "all",
+        org: str | None = None,
     ) -> int: ...
     async def size(self) -> int: ...
 
@@ -122,18 +122,18 @@ class TTLCache:
     async def clear(
         self,
         *,
-        scope: Literal["all", "repo"] = "all",
-        repo: str | None = None,
+        scope: Literal["all", "org"] = "all",
+        org: str | None = None,
     ) -> int:
         if scope == "all":
             count = len(self._store)
             self._store.clear()
             return count
-        if scope == "repo":
-            if not repo:
-                raise ValueError("scope='repo' requires the repo parameter")
+        if scope == "org":
+            if not org:
+                raise ValueError("scope='org' requires the org parameter")
             to_remove = [
-                k for k, entry in self._store.items() if entry.kwargs.get("repo") == repo
+                k for k, entry in self._store.items() if entry.kwargs.get("org") == org
             ]
             for k in to_remove:
                 del self._store[k]

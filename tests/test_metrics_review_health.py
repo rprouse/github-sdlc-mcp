@@ -20,6 +20,7 @@ from tests.fixtures import (
 
 SINCE = date.fromisoformat(FIXTURE_SINCE)
 UNTIL = date.fromisoformat(FIXTURE_UNTIL)
+ORG = FIXTURE_OWNER
 
 
 def _fixture_prs() -> list[NormalizedPR]:
@@ -40,15 +41,17 @@ def _pr(
     reviews: list[NormalizedReview] | None = None,
     created_at: datetime | None = None,
     merged_at: datetime | None = None,
+    owner: str = "acme",
+    repo: str = "web",
 ) -> NormalizedPR:
     base = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
     return NormalizedPR(
-        owner="o",
-        repo="r",
+        owner=owner,
+        repo=repo,
         number=number,
         author=author,
         title=f"PR {number}",
-        url=f"https://github.com/o/r/pull/{number}",
+        url=f"https://github.com/{owner}/{repo}/pull/{number}",
         created_at=created_at or base,
         merged_at=merged_at or base + timedelta(hours=10),
         closed_at=merged_at or base + timedelta(hours=10),
@@ -92,16 +95,17 @@ def _rev(
 
 def test_fixture_count_matches_merged() -> None:
     stats = compute_review_health(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=_fixture_prs()
+        org=ORG, since=SINCE, until=UNTIL, prs=_fixture_prs()
     )
     assert stats.count == 40
     assert stats.provider == "github"
+    assert stats.org == ORG
 
 
 def test_fixture_no_review_floor_matches_overlay() -> None:
     """Fixture has 5 no-review merges; pct = 5/40 = 12.5%."""
     stats = compute_review_health(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=_fixture_prs()
+        org=ORG, since=SINCE, until=UNTIL, prs=_fixture_prs()
     )
     assert stats.pct_merged_without_review is not None
     assert stats.pct_merged_without_review >= 12.5 - 0.01
@@ -109,27 +113,39 @@ def test_fixture_no_review_floor_matches_overlay() -> None:
 
 def test_fixture_fast_approval_count_meets_overlay() -> None:
     stats = compute_review_health(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=_fixture_prs()
+        org=ORG, since=SINCE, until=UNTIL, prs=_fixture_prs()
     )
     assert stats.fast_approval_count >= 3
 
 
 def test_fixture_self_merge_count_meets_overlay() -> None:
     stats = compute_review_health(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=_fixture_prs()
+        org=ORG, since=SINCE, until=UNTIL, prs=_fixture_prs()
     )
     assert stats.self_merge_count >= 2
 
 
 def test_fixture_examples_present() -> None:
     stats = compute_review_health(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=_fixture_prs()
+        org=ORG, since=SINCE, until=UNTIL, prs=_fixture_prs()
     )
     labels = {e.label for e in stats.examples}
     # All three overlays are exercised by the fixture.
     assert "no_review" in labels
     assert "fast_approval" in labels
     assert "deep_review" in labels
+
+
+def test_fixture_per_repo_slices_reconcile_to_rollup() -> None:
+    stats = compute_review_health(
+        org=ORG, since=SINCE, until=UNTIL, prs=_fixture_prs()
+    )
+    assert len(stats.repos) == 1
+    assert stats.repos[0].repo == FIXTURE_REPO
+    assert sum(s.count for s in stats.repos) == stats.count
+    # Per-repo counts of fast_approval / self_merge sum to org-level counts.
+    assert sum(s.fast_approval_count for s in stats.repos) == stats.fast_approval_count
+    assert sum(s.self_merge_count for s in stats.repos) == stats.self_merge_count
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +156,7 @@ def test_fixture_examples_present() -> None:
 def test_fast_approval_max_seconds_knob_can_zero_out_count() -> None:
     """Tightening the time threshold to 1 second must remove all detections."""
     stats = compute_review_health(
-        repo="acme/web",
+        org=ORG,
         since=SINCE,
         until=UNTIL,
         prs=_fixture_prs(),
@@ -152,7 +168,7 @@ def test_fast_approval_max_seconds_knob_can_zero_out_count() -> None:
 def test_fast_approval_min_lines_knob_excludes_small_prs() -> None:
     """Raising the lines threshold above the largest PR yields zero matches."""
     stats = compute_review_health(
-        repo="acme/web",
+        org=ORG,
         since=SINCE,
         until=UNTIL,
         prs=_fixture_prs(),
@@ -178,7 +194,7 @@ def test_self_only_review_counts_in_both_no_review_and_only_author() -> None:
         ],
     )
     stats = compute_review_health(
-        repo="o/r", since=SINCE, until=UNTIL, prs=[pr]
+        org=ORG, since=SINCE, until=UNTIL, prs=[pr]
     )
     assert stats.pct_merged_without_review == 100.0  # zero non-author reviews
     assert stats.pct_merged_with_only_author_review == 100.0
@@ -194,7 +210,7 @@ def test_non_author_review_excludes_pr_from_no_review_bucket() -> None:
         ],
     )
     stats = compute_review_health(
-        repo="o/r", since=SINCE, until=UNTIL, prs=[pr]
+        org=ORG, since=SINCE, until=UNTIL, prs=[pr]
     )
     assert stats.pct_merged_without_review == 0.0
     assert stats.pct_merged_with_only_author_review == 0.0
@@ -202,7 +218,7 @@ def test_non_author_review_excludes_pr_from_no_review_bucket() -> None:
 
 def test_empty_pr_set() -> None:
     stats = compute_review_health(
-        repo="o/r", since=SINCE, until=UNTIL, prs=[]
+        org=ORG, since=SINCE, until=UNTIL, prs=[]
     )
     assert stats.count == 0
     assert stats.median_reviewers_per_pr is None
@@ -212,6 +228,7 @@ def test_empty_pr_set() -> None:
     assert stats.fast_approval_count == 0
     assert stats.self_merge_count == 0
     assert stats.examples == []
+    assert stats.repos == []
     # Definitions still embedded.
     assert "review_no_review" in stats.definitions
 
@@ -225,7 +242,7 @@ def test_median_comments_uses_review_comments_count() -> None:
         _pr(3, review_comments_count=5, created_at=created),
     ]
     stats = compute_review_health(
-        repo="o/r", since=SINCE, until=UNTIL, prs=prs
+        org=ORG, since=SINCE, until=UNTIL, prs=prs
     )
     assert stats.median_comments_per_pr == 5.0
 
@@ -236,18 +253,18 @@ def test_self_merge_detection_requires_merged_by_set() -> None:
     other_pr = _pr(2, author="alice", merged_by="bob", created_at=created)
     no_info = _pr(3, author="alice", merged_by=None, created_at=created)
     stats = compute_review_health(
-        repo="o/r", since=SINCE, until=UNTIL, prs=[self_pr, other_pr, no_info]
+        org=ORG, since=SINCE, until=UNTIL, prs=[self_pr, other_pr, no_info]
     )
     assert stats.self_merge_count == 1
 
 
 # ---------------------------------------------------------------------------
-# Stub modules still raise — confirms the v0.1 scope is what spec v2 §10 says
+# Stub modules still raise — confirms the v0.2 scope is what spec v3 §10 says
 # ---------------------------------------------------------------------------
 
 
 def test_stubbed_metrics_raise_not_implemented() -> None:
     with pytest.raises(NotImplementedError):
         compute_ci_health(
-            repo="o/r", since=SINCE, until=UNTIL, prs=_fixture_prs()
+            org=ORG, since=SINCE, until=UNTIL, prs=_fixture_prs()
         )

@@ -1,7 +1,7 @@
 """GitHub client: PAT auth, rate-limit-aware async HTTP, GraphQL pagination."""
 
-from github_sdlc_mcp.client.auth import MissingTokenError, resolve_token
-from github_sdlc_mcp.client.github import GitHubClient, GitHubClientPool
+from github_sdlc_mcp.client.auth import MissingTokenError, resolve_github_token
+from github_sdlc_mcp.client.github import GitHubClient, make_github_client
 from github_sdlc_mcp.client.rate_limit import (
     GitHubGraphQLError,
     RateLimitError,
@@ -11,11 +11,11 @@ from github_sdlc_mcp.client.rate_limit import (
 
 __all__ = [
     "GitHubClient",
-    "GitHubClientPool",
     "GitHubGraphQLError",
     "MissingTokenError",
     "RateLimitError",
     "RateLimitState",
     "TransientServerError",
-    "resolve_token",
+    "make_github_client",
+    "resolve_github_token",
 ]

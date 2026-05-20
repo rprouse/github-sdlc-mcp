@@ -10,14 +10,12 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import respx
-from pydantic import AnyHttpUrl
 
 from github_sdlc_mcp.active_repos import (
     DiscoveredRepo,
     discover_active_repos,
 )
 from github_sdlc_mcp.client.github import GitHubClient
-from github_sdlc_mcp.config import GitHubHost
 
 BASE_URL = "https://api.github.com"
 SINCE = date(2026, 4, 15)
@@ -25,8 +23,12 @@ UNTIL = date(2026, 5, 15)
 
 
 def _client() -> GitHubClient:
-    host = GitHubHost(base_url=AnyHttpUrl(BASE_URL), token_env="GITHUB_TOKEN")
-    return GitHubClient(host, token="ghp_test", sleep=AsyncMock(), backoff_base=0.0)
+    return GitHubClient(
+        token="ghp_test",
+        base_url=BASE_URL,
+        sleep=AsyncMock(),
+        backoff_base=0.0,
+    )
 
 
 def _iso(dt: datetime) -> str:
@@ -322,3 +324,57 @@ def test_discovered_repo_is_a_frozen_dataclass() -> None:
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
         d.owner = "x"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# list_active_repos_impl — server-side wiring + response shape
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_active_repos_impl_returns_active_subset() -> None:
+    """Walking the org fixture, only repos pushed within the window survive."""
+    from github_sdlc_mcp.cache import TTLCache
+    from github_sdlc_mcp.server import (
+        build_context,
+        list_active_repos_impl,
+    )
+
+    in_window = datetime(2026, 5, 10, tzinfo=UTC)
+    out_of_window = datetime(2026, 1, 1, tzinfo=UTC)
+
+    respx.post(f"{BASE_URL}/graphql").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json=_org_page(
+                    [
+                        _repo_node("web", in_window),
+                        _repo_node("api", in_window),
+                        _repo_node("ancient", out_of_window),
+                    ]
+                ),
+            ),
+            httpx.Response(200, json=_merged_pr_page([])),  # web
+            httpx.Response(200, json=_merged_pr_page([])),  # api
+        ]
+    )
+    ctx = build_context(
+        env={"GITHUB_TOKEN": "ghp_test"},
+        cache=TTLCache(clock=lambda: 0.0),
+    )
+    # Disable sleeps so any retry doesn't block tests.
+    ctx.client._sleep = AsyncMock()
+    try:
+        result = await list_active_repos_impl(
+            ctx, org="acme", since=SINCE, until=UNTIL
+        )
+    finally:
+        await ctx.client.aclose()
+
+    assert result.org == "acme"
+    assert result.total_repos_scanned == 3
+    assert result.total_repos_active == 2
+    assert {r.repo for r in result.repos} == {"web", "api"}
+    assert result.provider == "github"

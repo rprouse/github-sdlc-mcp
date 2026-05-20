@@ -20,6 +20,7 @@ from tests.fixtures import (
 
 SINCE = date.fromisoformat(FIXTURE_SINCE)
 UNTIL = date.fromisoformat(FIXTURE_UNTIL)
+ORG = FIXTURE_OWNER
 
 
 def _fixture_prs() -> list[NormalizedPR]:
@@ -39,14 +40,16 @@ def _make_pr(
     deletions: int = 10,
     author: str = "alice",
     merged_by: str | None = "bob",
+    owner: str = "acme",
+    repo: str = "web",
 ) -> NormalizedPR:
     return NormalizedPR(
-        owner="o",
-        repo="r",
+        owner=owner,
+        repo=repo,
         number=number,
         author=author,
         title=f"PR {number}",
-        url=f"https://github.com/o/r/pull/{number}",
+        url=f"https://github.com/{owner}/{repo}/pull/{number}",
         created_at=created_at,
         merged_at=merged_at,
         closed_at=merged_at,
@@ -90,16 +93,16 @@ def _review(
 
 def test_fixture_count_matches_merged_in_window() -> None:
     stats = compute_cycle_time_stats(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=_fixture_prs()
+        org=ORG, since=SINCE, until=UNTIL, prs=_fixture_prs()
     )
     assert stats.count == 40
     assert stats.provider == "github"
-    assert stats.repo == "acme/web"
+    assert stats.org == ORG
 
 
 def test_fixture_stats_invariants() -> None:
     stats = compute_cycle_time_stats(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=_fixture_prs()
+        org=ORG, since=SINCE, until=UNTIL, prs=_fixture_prs()
     )
     assert stats.median_hours is not None
     assert stats.mean_hours is not None
@@ -113,7 +116,7 @@ def test_fixture_stats_invariants() -> None:
 
 def test_fixture_first_review_and_approval_medians_present() -> None:
     stats = compute_cycle_time_stats(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=_fixture_prs()
+        org=ORG, since=SINCE, until=UNTIL, prs=_fixture_prs()
     )
     # 5 no-review merges in the fixture, 35 with reviews → both should be set.
     assert stats.median_time_to_first_review_hours is not None
@@ -125,7 +128,7 @@ def test_fixture_first_review_and_approval_medians_present() -> None:
 
 def test_fixture_examples_are_three_distinct_with_expected_labels() -> None:
     stats = compute_cycle_time_stats(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=_fixture_prs()
+        org=ORG, since=SINCE, until=UNTIL, prs=_fixture_prs()
     )
     labels = [e.label for e in stats.examples]
     assert labels == ["slowest", "fastest", "median"]
@@ -143,7 +146,7 @@ def test_fixture_pinned_numbers() -> None:
     "test broke" without first identifying which side moved.
     """
     stats = compute_cycle_time_stats(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=_fixture_prs()
+        org=ORG, since=SINCE, until=UNTIL, prs=_fixture_prs()
     )
     assert stats.count == 40
     assert stats.median_hours is not None
@@ -158,6 +161,16 @@ def test_fixture_pinned_numbers() -> None:
     assert stats.median_approval_to_merge_hours < stats.median_hours
 
 
+def test_fixture_yields_single_repo_slice_reconciling_to_rollup() -> None:
+    """Per-repo slices must reconcile to the org rollup."""
+    stats = compute_cycle_time_stats(
+        org=ORG, since=SINCE, until=UNTIL, prs=_fixture_prs()
+    )
+    assert len(stats.repos) == 1
+    assert stats.repos[0].repo == FIXTURE_REPO
+    assert sum(s.count for s in stats.repos) == stats.count
+
+
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
@@ -165,7 +178,7 @@ def test_fixture_pinned_numbers() -> None:
 
 def test_empty_pr_set() -> None:
     stats = compute_cycle_time_stats(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=[]
+        org=ORG, since=SINCE, until=UNTIL, prs=[]
     )
     assert stats.count == 0
     assert stats.median_hours is None
@@ -174,6 +187,7 @@ def test_empty_pr_set() -> None:
     assert stats.median_time_to_first_review_hours is None
     assert stats.median_approval_to_merge_hours is None
     assert stats.examples == []
+    assert stats.repos == []
     # Definitions still embedded even on empty result — agents narrate the
     # zero count.
     assert "cycle_time_total" in stats.definitions
@@ -184,7 +198,7 @@ def test_single_pr_yields_collapsed_stats() -> None:
     merged = created + timedelta(hours=10)
     pr = _make_pr(1, created_at=created, merged_at=merged)
     stats = compute_cycle_time_stats(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=[pr]
+        org=ORG, since=SINCE, until=UNTIL, prs=[pr]
     )
     assert stats.count == 1
     assert stats.median_hours == 10.0
@@ -192,6 +206,8 @@ def test_single_pr_yields_collapsed_stats() -> None:
     assert stats.p90_hours == 10.0
     assert len(stats.examples) == 1
     assert stats.examples[0].label == "slowest"
+    assert len(stats.repos) == 1
+    assert stats.repos[0].count == 1
 
 
 def test_window_filter_excludes_out_of_range_merges() -> None:
@@ -203,7 +219,7 @@ def test_window_filter_excludes_out_of_range_merges() -> None:
         merged_at=datetime(2026, 7, 2, tzinfo=UTC),
     )
     stats = compute_cycle_time_stats(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=[in_window, way_after]
+        org=ORG, since=SINCE, until=UNTIL, prs=[in_window, way_after]
     )
     assert stats.count == 1
 
@@ -215,7 +231,7 @@ def test_no_reviews_yields_null_review_medians() -> None:
         for i in range(5)
     ]
     stats = compute_cycle_time_stats(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=prs
+        org=ORG, since=SINCE, until=UNTIL, prs=prs
     )
     assert stats.count == 5
     assert stats.median_hours is not None
@@ -237,8 +253,34 @@ def test_author_reviews_excluded_from_first_review_calculation() -> None:
         ],
     )
     stats = compute_cycle_time_stats(
-        repo="acme/web", since=SINCE, until=UNTIL, prs=[pr]
+        org=ORG, since=SINCE, until=UNTIL, prs=[pr]
     )
     # No non-author review → both subset medians are None.
     assert stats.median_time_to_first_review_hours is None
     assert stats.median_approval_to_merge_hours is None
+
+
+def test_per_repo_slices_partition_org_prs() -> None:
+    """Two repos in the same org → two slices, counts sum to org count."""
+    created = datetime(2026, 5, 1, 0, 0, 0, tzinfo=UTC)
+    web_prs = [
+        _make_pr(
+            i, created_at=created, merged_at=created + timedelta(hours=10),
+            owner="acme", repo="web",
+        )
+        for i in range(1, 4)
+    ]
+    api_prs = [
+        _make_pr(
+            10 + i, created_at=created, merged_at=created + timedelta(hours=10),
+            owner="acme", repo="api",
+        )
+        for i in range(1, 3)
+    ]
+    stats = compute_cycle_time_stats(
+        org=ORG, since=SINCE, until=UNTIL, prs=[*web_prs, *api_prs]
+    )
+    assert stats.count == 5
+    assert len(stats.repos) == 2
+    assert {s.repo for s in stats.repos} == {"web", "api"}
+    assert sum(s.count for s in stats.repos) == stats.count

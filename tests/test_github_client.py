@@ -10,29 +10,55 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import respx
-from pydantic import AnyHttpUrl
 
-from github_sdlc_mcp.client.github import GitHubClient, GitHubClientPool
+from github_sdlc_mcp.client.auth import MissingTokenError
+from github_sdlc_mcp.client.github import (
+    DEFAULT_BASE_URL,
+    GitHubClient,
+    make_github_client,
+)
 from github_sdlc_mcp.client.rate_limit import (
     GitHubGraphQLError,
     TransientServerError,
 )
-from github_sdlc_mcp.config import GitHubHost
 
-BASE_URL = "https://api.github.com"
-
-
-def _host() -> GitHubHost:
-    return GitHubHost(base_url=AnyHttpUrl(BASE_URL), token_env="GITHUB_TOKEN")
+BASE_URL = DEFAULT_BASE_URL
 
 
 def _client(**kwargs: Any) -> GitHubClient:
     defaults: dict[str, Any] = {
+        "token": "ghp_test",
         "sleep": AsyncMock(),
         "backoff_base": 0.0,  # zero so even un-mocked sleeps would be instant
     }
     defaults.update(kwargs)
-    return GitHubClient(_host(), token="ghp_test", **defaults)
+    return GitHubClient(**defaults)
+
+
+# ---------------------------------------------------------------------------
+# make_github_client factory
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_make_github_client_wires_token_into_authorization_header() -> None:
+    """The factory must thread the env token through to the Bearer header."""
+    route = respx.post(f"{BASE_URL}/graphql").mock(
+        return_value=httpx.Response(200, json={"data": {"ok": True}})
+    )
+    client = make_github_client(env={"GITHUB_TOKEN": "ghp_from_env"})
+    try:
+        await client.graphql("query {}")
+    finally:
+        await client.aclose()
+    assert route.called
+    assert route.calls.last.request.headers["Authorization"] == "Bearer ghp_from_env"
+
+
+def test_make_github_client_raises_when_token_missing() -> None:
+    with pytest.raises(MissingTokenError):
+        make_github_client(env={})
 
 
 # ---------------------------------------------------------------------------
@@ -383,46 +409,3 @@ async def test_pagination_passes_cursor_in_subsequent_requests() -> None:
     second_body = route.calls[1].request.content.decode()
     assert "CURSOR1" not in first_body
     assert "CURSOR1" in second_body
-
-
-# ---------------------------------------------------------------------------
-# Pool
-# ---------------------------------------------------------------------------
-
-
-def test_pool_lazily_creates_clients() -> None:
-    hosts = {
-        "cloud": GitHubHost(
-            base_url=AnyHttpUrl("https://api.github.com"), token_env="TOK_A"
-        ),
-        "ent": GitHubHost(
-            base_url=AnyHttpUrl("https://ghe.example/api/v3"), token_env="TOK_B"
-        ),
-    }
-    pool = GitHubClientPool(hosts, env={"TOK_A": "a", "TOK_B": "b"})
-    assert pool.active_host_keys == []
-    c1 = pool.get("cloud")
-    assert pool.active_host_keys == ["cloud"]
-    c1_again = pool.get("cloud")
-    assert c1 is c1_again
-    pool.get("ent")
-    assert set(pool.active_host_keys) == {"cloud", "ent"}
-
-
-def test_pool_unknown_host_raises() -> None:
-    pool = GitHubClientPool({}, env={})
-    with pytest.raises(KeyError):
-        pool.get("nope")
-
-
-@pytest.mark.asyncio
-async def test_pool_close_clears_all() -> None:
-    hosts = {
-        "cloud": GitHubHost(
-            base_url=AnyHttpUrl("https://api.github.com"), token_env="TOK"
-        ),
-    }
-    pool = GitHubClientPool(hosts, env={"TOK": "abc"})
-    pool.get("cloud")
-    await pool.aclose()
-    assert pool.active_host_keys == []

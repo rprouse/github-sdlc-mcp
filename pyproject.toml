@@ -1,6 +1,6 @@
 [project]
 name = "github-sdlc-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "FastMCP server exposing SDLC metrics derived from GitHub."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,8 +25,6 @@ dependencies = [
     "python-dateutil>=2.9",
     "tenacity>=8.4",
     "structlog>=24.1",
-    "pyyaml>=6.0",
-    "platformdirs>=4.2",
 ]
 
 [project.scripts]
@@ -45,7 +43,6 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
     "types-python-dateutil>=2.9",
-    "types-pyyaml>=6.0",
 ]
 
 [build-system]
