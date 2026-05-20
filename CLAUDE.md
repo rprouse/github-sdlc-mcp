@@ -29,7 +29,9 @@ CI (`.github/workflows/ci.yml`) runs ubuntu × Python 3.12 only: `uv sync --froz
 
 ## Authoritative spec
 
-`docs/spec_v2.md` supersedes `docs/initial_spec.md` where they conflict. v2 is a **delta document** — it records 11 resolved decisions (keyword-only tool args, PAT-only auth, stale-PR signature exception, the 300-second fast-approval threshold, the revert heuristic, etc.) and the v0.1.0 scope table in §10. Treat the scope table as the acceptance contract.
+`docs/spec_v3.md` is authoritative for v0.2.0+. It is a delta over
+`docs/spec_v2.md`, which in turn was a delta over `docs/initial_spec.md`.
+Where they conflict, v3 wins. v2 is a **delta document** — it records 11 resolved decisions (keyword-only tool args, PAT-only auth, stale-PR signature exception, the 300-second fast-approval threshold, the revert heuristic, etc.) and the v0.1.0 scope table in §10. Treat the scope table as the acceptance contract.
 
 Each phase of the build has a plan doc in `docs/plans/0[1-8]-*.md` explaining design decisions for that layer. Read the relevant plan before changing code in that area.
 
