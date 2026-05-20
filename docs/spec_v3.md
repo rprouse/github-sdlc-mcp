@@ -28,4 +28,4 @@ in that org.
 
 ## Implementation plan
 
-See `docs/plans/09-org-only-pivot.md`.
+See `docs/superpowers/plans/2026-05-19-org-only-pivot.md`.
