@@ -61,7 +61,7 @@ GitHub API  →  client/  →  normalize.py  →  metrics/  →  server.py  → 
 
 ### Active-repo walker (`active_repos.py`)
 
-The **load-bearing fetch primitive**. Every metric tool starts by calling `discover_active_repos(client, org=..., since=..., until=...)` to enumerate which repos in the org saw activity in the window; only those repos get their PRs fetched. `server.py:_load_prs_for_org` fans the per-repo fetches out with `asyncio.Semaphore(8)` and gathers — fail-fast: one bad repo poisons the whole org call (v0.3 may swallow per-repo errors). The walker:
+The **load-bearing fetch primitive**. Every metric tool starts by calling `discover_active_repos(client, org=..., since=..., until=...)` to enumerate which repos in the org saw activity in the window; only those repos get their PRs fetched. `server.py:_load_prs_for_org` fans the per-repo fetches out with `asyncio.Semaphore(N)` (default `N=16`, overridable via `GITHUB_SDLC_MCP_MAX_CONCURRENT_REPO_FETCHES`) and gathers — fail-fast: one bad repo poisons the whole org call (v0.3 may swallow per-repo errors). The walker:
 
 1. Paginates `organization.repositories` ordered by `PUSHED_AT DESC`.
 2. Breaks as soon as a node's `pushed_at < since` (every subsequent node is older).

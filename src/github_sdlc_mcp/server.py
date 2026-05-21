@@ -24,14 +24,8 @@ from github_sdlc_mcp.active_repos import DiscoveredRepo, discover_active_repos
 from github_sdlc_mcp.cache import Cache, TTLCache
 from github_sdlc_mcp.client.github import GitHubClient, make_github_client
 from github_sdlc_mcp.metrics import (
-    compare_to_baseline,
-    compute_ci_health,
     compute_cycle_time_stats,
-    compute_merge_activity,
-    compute_portfolio_summary,
-    compute_pr_size_stats,
     compute_review_health,
-    compute_stale_prs,
 )
 from github_sdlc_mcp.metrics.definitions import (
     FAST_APPROVAL_MAX_SECONDS_DEFAULT,
@@ -58,7 +52,7 @@ from github_sdlc_mcp.normalize import PR_PAGE_QUERY, normalize_pr
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
-_MAX_CONCURRENT_REPO_FETCHES = 8
+_MAX_CONCURRENT_REPO_FETCHES_DEFAULT = 16
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +129,12 @@ async def _load_prs_for_org(
     is on the v0.3+ list.
     """
     repos, _scanned = await _active_repos(ctx, org=org, since=since, until=until)
-    sem = asyncio.Semaphore(_MAX_CONCURRENT_REPO_FETCHES)
+    max_concurrent = _read_threshold_int(
+        ctx,
+        "GITHUB_SDLC_MCP_MAX_CONCURRENT_REPO_FETCHES",
+        _MAX_CONCURRENT_REPO_FETCHES_DEFAULT,
+    )
+    sem = asyncio.Semaphore(max_concurrent)
 
     async def _fetch(d: DiscoveredRepo) -> list[NormalizedPR]:
         async with sem:
@@ -340,24 +339,18 @@ async def get_review_health_impl(
 async def get_pr_size_stats_impl(
     ctx: ServerContext, *, org: str, since: date, until: date | None = None
 ) -> PRSizeStats:
-    resolved_until = _resolve_until(until)
-    prs = await _load_prs_for_org(
-        ctx, org=org, since=since, until=resolved_until
-    )
-    return compute_pr_size_stats(
-        org=org, since=since, until=resolved_until, prs=prs
+    raise NotImplementedError(
+        "get_pr_size_stats is stubbed in v0.2; see docs/spec_v3.md §10. "
+        "Tool is registered for surface discovery only."
     )
 
 
 async def get_ci_health_impl(
     ctx: ServerContext, *, org: str, since: date, until: date | None = None
 ) -> CIHealthStats:
-    resolved_until = _resolve_until(until)
-    prs = await _load_prs_for_org(
-        ctx, org=org, since=since, until=resolved_until
-    )
-    return compute_ci_health(
-        org=org, since=since, until=resolved_until, prs=prs
+    raise NotImplementedError(
+        "get_ci_health is stubbed in v0.2; see docs/spec_v3.md §10. "
+        "Tool is registered for surface discovery only."
     )
 
 
@@ -368,26 +361,18 @@ async def get_stale_prs_impl(
     threshold_days: int = 14,
     as_of: date | None = None,
 ) -> StalePRList:
-    today = as_of or datetime.now(UTC).date()
-    prs = await _load_prs_for_org(ctx, org=org, since=today, until=today)
-    return compute_stale_prs(
-        org=org, prs=prs, threshold_days=threshold_days, as_of=as_of
+    raise NotImplementedError(
+        "get_stale_prs is stubbed in v0.2; see docs/spec_v3.md §10. "
+        "Tool is registered for surface discovery only."
     )
 
 
 async def get_merge_activity_impl(
     ctx: ServerContext, *, org: str, since: date, until: date | None = None
 ) -> MergeActivityStats:
-    resolved_until = _resolve_until(until)
-    prs = await _load_prs_for_org(
-        ctx, org=org, since=since, until=resolved_until
-    )
-    return compute_merge_activity(
-        org=org,
-        since=since,
-        until=resolved_until,
-        prs=prs,
-        default_branch_commits=[],
+    raise NotImplementedError(
+        "get_merge_activity is stubbed in v0.2; see docs/spec_v3.md §10. "
+        "Tool is registered for surface discovery only."
     )
 
 
@@ -399,13 +384,9 @@ async def get_portfolio_summary_impl(
     until: date | None = None,
     include_inactive: bool = False,
 ) -> PortfolioSummary:
-    resolved_until = _resolve_until(until)
-    return compute_portfolio_summary(
-        org=org,
-        since=since,
-        until=resolved_until,
-        prs=[],
-        include_inactive=include_inactive,
+    raise NotImplementedError(
+        "get_portfolio_summary is stubbed in v0.2; see docs/spec_v3.md §10. "
+        "Tool is registered for surface discovery only."
     )
 
 
@@ -417,13 +398,9 @@ async def compare_to_baseline_impl(
     current_window_days: int = 30,
     baseline_window_days: int = 90,
 ) -> BaselineComparison:
-    today = datetime.now(UTC).date()
-    return compare_to_baseline(
-        org=org,
-        metric=metric,
-        as_of=today,
-        current_window_days=current_window_days,
-        baseline_window_days=baseline_window_days,
+    raise NotImplementedError(
+        "compare_to_baseline is stubbed in v0.2; see docs/spec_v3.md §10. "
+        "Tool is registered for surface discovery only."
     )
 
 

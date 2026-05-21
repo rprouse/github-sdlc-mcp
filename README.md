@@ -94,6 +94,7 @@ the MCP host establishes its connection.
 | `GITHUB_SDLC_MCP_RATE_LIMIT_FLOOR` | 100 | Pause requests when primary quota dips below |
 | `GITHUB_SDLC_MCP_FAST_APPROVAL_MIN_LINES` | 200 | Fast-approval line-count threshold |
 | `GITHUB_SDLC_MCP_FAST_APPROVAL_MAX_SECONDS` | 300 | Fast-approval time threshold (5 min) |
+| `GITHUB_SDLC_MCP_MAX_CONCURRENT_REPO_FETCHES` | 16 | Per-org PR fan-out concurrency cap |
 
 ## Tool reference
 
