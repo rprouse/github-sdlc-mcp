@@ -25,6 +25,10 @@ uv run python -m tests.fixtures._generate    # regenerate the synthetic PR/commi
 
 CI (`.github/workflows/ci.yml`) runs ubuntu × Python 3.12 only: `uv sync --frozen`, `ruff check`, `mypy`, `pytest --cov`. `ruff format` is not enforced — leave it out of any "make CI green" instinct unless asked.
 
+If `uv run` fails on Windows with `failed to remove file ... github-sdlc-mcp.exe: ... being used by another process`, the venv's CLI shim is locked (usually by a running MCP host). Bypass it by invoking the tool through the venv's Python directly: `.venv/Scripts/python -m pytest`, `... -m ruff check`, `... -m mypy`. Same results, no shim refresh.
+
+The CI gates are `ruff check`, `mypy`, `pytest` (in that order of pickiness). IDE language servers (Pyright/Pylance in VS Code) often disagree — they may flag unresolved imports when they can't find the venv, or "not accessed" on names only used in annotations under `from __future__ import annotations`. **Trust the gate commands, not the squigglies.** If mypy is happy, the code is type-correct for this project's standard.
+
 ## Authoritative spec
 
 `docs/spec_v3.md` is authoritative for v0.2.0+. It is a delta over
