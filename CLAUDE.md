@@ -9,11 +9,9 @@ This project uses **uv** for everything. Do not use pip directly.
 ```bash
 uv sync                                  # install dependencies (writes .venv/, uses uv.lock)
 uv run github-sdlc-mcp --help            # CLI
-uv run github-sdlc-mcp config path       # show resolved config path + search order
-uv run github-sdlc-mcp config init       # write template repos.yaml to platformdirs dir
-uv run github-sdlc-mcp config validate   # parse + Pydantic-validate the resolved config
+GITHUB_TOKEN=ghp_... uv run github-sdlc-mcp  # run the server over stdio (or set GH_TOKEN)
 
-uv run pytest -q                         # all tests (~187, ~2s)
+uv run pytest -q                         # all tests (~171, ~3s)
 uv run pytest tests/test_metrics_cycle_time.py -q              # one file
 uv run pytest tests/test_metrics_cycle_time.py::test_fixture_count_matches_merged_in_window
 uv run pytest -k "rate_limit"            # match by name
@@ -33,7 +31,7 @@ CI (`.github/workflows/ci.yml`) runs ubuntu × Python 3.12 only: `uv sync --froz
 `docs/spec_v2.md`, which in turn was a delta over `docs/initial_spec.md`.
 Where they conflict, v3 wins. v2 is a **delta document** — it records 11 resolved decisions (keyword-only tool args, PAT-only auth, stale-PR signature exception, the 300-second fast-approval threshold, the revert heuristic, etc.) and the v0.1.0 scope table in §10. Treat the scope table as the acceptance contract.
 
-Each phase of the build has a plan doc in `docs/plans/0[1-8]-*.md` explaining design decisions for that layer. Read the relevant plan before changing code in that area.
+Each phase of the build has a plan doc in `docs/plans/0[1-9]-*.md` explaining design decisions for that layer. Phase-02 (`config-resolution`) is archived under `docs/plans/archive/` since the layer it documented was deleted in v0.2.0; read it only for historical context. Read the relevant active plan before changing code in that area. The v0.2.0 implementation plan with full task-by-task detail lives at `docs/superpowers/plans/2026-05-19-org-only-pivot.md`.
 
 ## Architecture
 
@@ -59,7 +57,7 @@ GitHub API  →  client/  →  normalize.py  →  metrics/  →  server.py  → 
 
 ### Active-repo walker (`active_repos.py`)
 
-This is the priority deliverable from spec v2 §10. The naive approach (query each configured repo for activity) wastes 10-100x API quota on portfolio orgs. The walker:
+The **load-bearing fetch primitive**. Every metric tool starts by calling `discover_active_repos(client, org=..., since=..., until=...)` to enumerate which repos in the org saw activity in the window; only those repos get their PRs fetched. `server.py:_load_prs_for_org` fans the per-repo fetches out with `asyncio.Semaphore(8)` and gathers — fail-fast: one bad repo poisons the whole org call (v0.3 may swallow per-repo errors). The walker:
 
 1. Paginates `organization.repositories` ordered by `PUSHED_AT DESC`.
 2. Breaks as soon as a node's `pushed_at < since` (every subsequent node is older).
@@ -69,11 +67,13 @@ Early-termination is **load-bearing** — `tests/test_active_repos.py::test_walk
 
 ### Stubs vs implemented
 
-v0.1.0 ships `cycle_time` and `review_health` fully implemented; the other six metrics (`ci_health`, `pr_size`, `stale`, `merge_activity`, `portfolio`, `baseline`) are stubs that raise `NotImplementedError` with a consistent message pointing at `docs/spec_v2.md §10`. The tool surface is real — `build_server` registers all 12 — so an agent sees the API even where the math isn't yet. Don't "fix" the stubs without checking the v0.2 scope.
+v0.2.0 ships `cycle_time` and `review_health` fully implemented; the other six metrics (`ci_health`, `pr_size`, `stale`, `merge_activity`, `portfolio`, `baseline`) are stubs that raise `NotImplementedError` with a consistent message pointing at `docs/spec_v3.md §10`. The tool surface is real — `build_server` registers all 11 — so an agent sees the API even where the math isn't yet. Don't "fix" the stubs without checking the v0.3 scope.
+
+Every metric response carries both an **org-level rollup** (top-level fields) and a **per-repo breakdown** under `repos: list[*RepoSlice]`. The `_per_repo_slices` helper in each metric file groups merged PRs by `pr.repo` and re-runs the same `_aggregate()` per group — medians-of-medians does not equal median-of-the-union, so the rollup is computed independently rather than re-aggregated from slices.
 
 ### Cache
 
-`Cache` is an async `Protocol` (in `cache.py`). The v0.1 implementation is `TTLCache` (in-memory, 15-min default TTL). Async-from-day-one because phase 8 wraps every metric tool with `await cache.get(...)` — when Postgres lands in v0.2, no call site changes. Cache keys are `(tool_name, json.dumps(kwargs, sort_keys=True))` with a custom default that handles `date`/`datetime`/`Path` and **raises on unsupported types** (silent collisions via repr fallback are worse than loud failures). `clear_cache(scope="repo")` filters by the original kwargs stored alongside each entry — that's why entries carry their kwargs dict.
+`Cache` is an async `Protocol` (in `cache.py`). The current implementation is `TTLCache` (in-memory, 15-min default TTL). Async-from-day-one because `server.py` wraps every metric tool with `await cache.get(...)` — when Postgres lands in v0.3+, no call site changes. Cache keys are `(tool_name, json.dumps(kwargs, sort_keys=True))` with a custom default that handles `date`/`datetime`/`Path` and **raises on unsupported types** (silent collisions via repr fallback are worse than loud failures). `clear_cache(scope="org", org="...")` filters by the `org` kwarg stored alongside each entry — that's why entries carry their kwargs dict.
 
 ### Synthetic fixture
 
@@ -88,9 +88,11 @@ v0.1.0 ships `cycle_time` and `review_health` fully implemented; the other six m
 - **Review/check state strings are lowercased Literals** (`"approved"`, `"completed"`, etc.). The normalizer handles the conversion; unknown states fall back to safe defaults rather than raising.
 - **Revert detection is intentionally narrow** (spec v2 §6): `Revert "...` prefix OR `Reverts #N` trailer. Hand-authored reverts are false-negative by design.
 - **Fast-approval default is 300 seconds (5 min), not 60.** Configurable via env vars named in `definitions.py` and quoted in the metric's definition string.
+- **Every tool takes a single `org: str`** (cloud GitHub only). No `repo` argument. The combining skill above this server is responsible for mapping companies to orgs; this server has no persistent config of its own.
+- **Auth is `GITHUB_TOKEN`** (preferred) **or `GH_TOKEN`** (fallback, matches `gh` CLI). Read once at startup; missing-token errors fail loudly before FastMCP starts listening.
 
 ## Working with this codebase
 
 - Prefer reading the relevant `docs/plans/0X-*.md` before changing code — they record *why* each layer is shaped the way it is.
-- If you're adding a metric, the contract is: pure function over `Iterable[NormalizedPR]` returning a Pydantic response model, with `definitions=definitions_for(...)` populated. Add the definition string to `metrics/definitions.py` first; the orphan/typo tests will guide you.
-- When debugging a Windows-specific bug, run the CLI directly — the test suite injects `platformdirs_dir` and won't surface path-formation issues. Example: the platformdirs `appauthor=False` fix in `config.py` was only catchable by running the CLI.
+- If you're adding a metric, the contract is: pure function over `Iterable[NormalizedPR]` accepting `org: str` and returning a Pydantic response model with `repos: list[*RepoSlice]` (per-repo breakdown) plus org-level rollup fields, with `definitions=definitions_for(...)` populated. Add the definition string to `metrics/definitions.py` first; the orphan/typo tests will guide you. The `_aggregate()` + `_per_repo_slices()` pattern in `metrics/cycle_time.py` is the canonical template.
+- The cross-cutting per-repo / rollup invariant is exercised in `tests/test_metrics_per_repo_invariant.py` via a parametrized list. Add new metrics to that list as they're implemented.
